@@ -44,8 +44,8 @@ use Fcntl ':flock';
 use Sys::Syslog;
 use File::Basename 'basename', 'dirname';
 
-# 引数は設定ファイル名。1つのみ。設定ファイル名(hogehoge.conf)は他と重
-# ならないようにしてください。
+# 引数は設定ファイル名のみ．コマンドラインオプション解析などやってません．
+# 引数をそのまま設定ファイル名と解釈します．
 
 if($#ARGV  < 0 )
 {
