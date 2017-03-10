@@ -8,22 +8,31 @@
 # 登録内容に変更があった場合、ipfwのルールを書き換えます。
 #     
 # Ref: [FreeBSD-users-jp 96055]
-#
+
+##############################################
+# 初期設定
+# このファイル(ipfw-dns-kanshi)を /usr/local/sbin/ipfw-dns-kanshi などに置いてください．
+# chmod +x してください．
 
 # 設定ファイルとして最低二つ必要です。
-#   大域的な設定 : $CONF_FILE_PREFIX/GLOBAL-CONF
-#   個々のルール毎の設定 : $CONF_FILE_PREFIX/$CONF
+#
+#   大域的な設定 : /usr/local/etc/ipfw-dns-kanshi/GLOBAL-CONF
+#   個々のルール毎の設定 : /usr/local/etc/ipfw-dns-kanshi/$CONF
+
+# ディレクトリ conf の中身を /usr/local/etc/ipfw-dns-kanshi/ にコピーしてください．
+#
+#  conf/* などを参照してrc.firewallに加筆してください．
 
 # データファイルとして
 # 「/var/tmp/ipfw-dns-kansh-設定ファイル名.dat」
 # 「/var/tmp/ipfw-dns-kansh.lock」
 # というファイルを作ります。
 
-# TODO: DNSの応答に変更があった時、ipfw の現在の内容と比較して必要な定
-# 義のみの削除追加をする。現在は無条件で定義上書きのため、アクティブな
-# セッションが切れる可能性有り。ipfwで書き込んだ時のルールと ipfw -L
-# で表示されるルールは微妙に違うので、ルールを書いたあとすぐに ipfw -L
-# で表示させてそれを保存しておく。
+# root権限で crontab -e で次のような記載を行ってください．
+# ----------------
+# 15 * * * * /usr/local/sbin/ipfw-dns-kanshi 利用する設定ファイルを列記してください
+# ----------------
+# 以上
 
 use File::Copy;
 use Fcntl ':flock';

@@ -12,10 +12,10 @@ $TARGET_TABLE_NUM="30";
 
 # /etc/rc.firewallの適切なところに以下のようなルールを記載してください。
 # nnnのところは$TARGET_TABLE_NUMと同じ数字を記載してください。
-# hostnameのところは$TARGET_HOSTと同じホスト名を記載してください。
+# hostnameのところは@TARGET_HOSTと同じホスト名を記載してください。
 
-# ${ipfw} add allow udp from LOCAL-IP to table(nnn) ntp keep-state
-# ${ipfw} table nnn add hostname
+# ${fwcmd} add allow udp from LOCAL-IP to table(nnn) ntp keep-state
+# ${fwcmd} table nnn add hostname
 
 
 # 最後に1を書いてください。
