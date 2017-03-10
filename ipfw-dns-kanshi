@@ -3,11 +3,16 @@
 # Copyright 2017 Ryuji MATSUMOTO
 # License: GPL2
 
-# DNSを監視して ipfwを更新するツール。ipfwのルールにホスト名(www.example.com)
-# とか書いてもipfwを実行時に引いたIPアドレス固定になります。DNSを監視して、DNSの
-# 登録内容に変更があった場合、ipfwのルールを書き換えます。
+# 動作確認OS: FreeBSD R10.3のみ．
+
+# DNSを監視して ipfwのルールを更新するツール。ipfwのルールにホスト名
+# (www.example.com)とか書いてもipfwを実行時に引いたIPアドレス固定になり
+# ます。DNSを監視して、DNSの登録内容に変更があった場合、ipfwのルールを
+# 書き換えます。
+
 #     
-# Ref: [FreeBSD-users-jp 96055]
+# なおこのプログラムの開発動機(?)はML の [FreeBSD-users-jp 96055]をご覧
+# ください．
 
 ##############################################
 # 初期設定
