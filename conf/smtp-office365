@@ -1,0 +1,23 @@
+# -*- perl -*-
+# perlの文法で記載してください。
+
+# IPアドレスの集約に関する設定。 x.x.x.nn の nnの8bitの部分をx.x.x.0/24に集約するか?
+
+#$G_get_ip_addr_cut_tail_8bit = 1; # DNSの返り値の下8bitを切り捨てる。(default)
+$G_get_ip_addr_cut_tail_8bit = 0; # DNSの返り値の下8bitを切り捨てない。
+
+@TARGET_HOSTS=("smtp.office365.com");
+
+$TARGET_TABLE_NUM="21";
+
+# /etc/rc.firewallの適切なところに以下のようなルールを記載してください。
+# nnnのところは$TARGET_TABLE_NUMと同じ数字を記載してください。
+# hostnameのところは$TARGET_HOSTと同じホスト名を記載してください。
+
+# ${ipfw} add allow tcp from LOCAL-IP to table(nnn) imaps,submission
+# ${ipfw} table nnn add hostname
+
+
+# 最後に1を書いてください。
+1;
+#EOF

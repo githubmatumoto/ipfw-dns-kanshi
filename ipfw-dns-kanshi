@@ -1,0 +1,389 @@
+#!/usr/bin/perl
+#
+# Copyright 2017 Ryuji MATSUMOTO
+# License: GPL2
+
+# DNSを監視して ipfwを更新するツール。ipfwのルールにホスト名(www.example.com)
+# とか書いてもipfwを実行時に引いたIPアドレス固定になります。DNSを監視して、DNSの
+# 登録内容に変更があった場合、ipfwのルールを書き換えます。
+#     
+# Ref: [FreeBSD-users-jp 96055]
+#
+
+# 設定ファイルとして最低二つ必要です。
+#   大域的な設定 : $CONF_FILE_PREFIX/GLOBAL-CONF
+#   個々のルール毎の設定 : $CONF_FILE_PREFIX/$CONF
+
+# データファイルとして
+# 「/var/tmp/ipfw-dns-kansh-設定ファイル名.dat」
+# 「/var/tmp/ipfw-dns-kansh.lock」
+# というファイルを作ります。
+
+# TODO: DNSの応答に変更があった時、ipfw の現在の内容と比較して必要な定
+# 義のみの削除追加をする。現在は無条件で定義上書きのため、アクティブな
+# セッションが切れる可能性有り。ipfwで書き込んだ時のルールと ipfw -L
+# で表示されるルールは微妙に違うので、ルールを書いたあとすぐに ipfw -L
+# で表示させてそれを保存しておく。
+
+use File::Copy;
+use Fcntl ':flock';
+use Sys::Syslog;
+use File::Basename 'basename', 'dirname';
+
+# 引数は設定ファイル名。1つのみ。設定ファイル名(hogehoge.conf)は他と重
+# ならないようにしてください。
+
+if($#ARGV  < 0 )
+{
+    print STDERR "usage : $0 CONFIG_FILE [CONFIG_FILE..]\n";
+    exit;
+}
+
+################################################
+# 設定ファイルは $CONF_FILE_PREFIXに置いてください。
+# 
+$CONF_FILE_PREFIX="/usr/local/etc/ipfw-dns-kanshi"; # ディレクトリ(read only)
+$DATA_FILE_PREFIX="/var/tmp"; # ディレクトリ (read/write)
+
+################################################
+# 多重起動禁止
+# Ref: http://perldoc.perl.org/functions/flock.html
+
+open (LOCK, ">" . $DATA_FILE_PREFIX . "/ipfw-dns-kanshi.lock") or die;
+flock(LOCK,  LOCK_EX|LOCK_NB) or die "ERROR: Cannot lock";
+
+# 大域設定ファイルの読み込み。大域変数の初期化。
+&load_global_config();
+
+#######################
+# 各設定ファイルの読み込み。
+
+openlog(basename($0), 'pid', 'security');
+
+conf: for my $conf (@ARGV)
+{
+    #my $debug=1;
+    my $debug=0;    
+    &load_config($conf);
+
+    my $curr_time = time;
+
+    # Load History Database;
+
+    my $dat_fname=${DATA_FILE_PREFIX}."/ipfw-dns-kanshi-${conf}.dat";
+    my %his_ip_list = &load_history_dat($dat_fname, $conf, $curr_time);
+
+    if($debug)
+    {
+	for my $key (keys %his_ip_list)
+	{
+	    printf("DEBUG: (load) %%his_ip_list: %s = %s(sec)\n", $key, $his_ip_list{$key});
+	}
+    }
+
+    # Lookup DNS
+    my @ip_list =();
+    
+    for my $h (@TARGET_HOSTS)
+    {
+	my @tmp = &get_ip_addr($h);
+
+	if($#tmp < 0)
+	{
+	    printf STDERR "ERROR: CONFIG: ${conf}\n";
+	    printf STDERR "ERROR: DNS Lookup fail: ${h}\n";
+	    next conf;
+	}
+	push(@ip_list, @tmp);
+    }
+    @ip_list = &ip_sort_uniq(@ip_list);
+
+    if($debug)
+    {
+	for my $i (@ip_list)
+	{
+	    print "DEBUG (lookup) \$ip_list = ${i}\n";
+	}
+    }
+    
+    # DNSの参照時間の更新。
+    for my $i (@ip_list)
+    {
+	$his_ip_list{$i} = $curr_time;
+    }
+
+    # Save history database;
+    if($debug)
+    {
+	for my $key (keys %his_ip_list)
+	{
+	    printf("DEBUG :(write) %%his_ip_list: %s = %s(sec)\n", $key, $his_ip_list{$key});
+	}
+    }
+    &write_history_dat($dat_fname, \%his_ip_list);
+
+    # Load Current Rule
+    my @current_table = &get_current_table($TARGET_TABLE_NUM);
+
+    if($debug)
+    {
+	for my $ip (@current_table)
+	{
+	    printf("DEBUG : \@current_table = %s\n", $ip); 
+	}
+    }
+
+    my @delete_table = ();
+    for my $i (@current_table)
+    {
+	if(defined($his_ip_list{$i}))
+	{
+	    delete $his_ip_list{$i};
+	}
+	else
+	{
+	    push(@delete_table, $i);
+	}
+    }
+    my @add_table = keys %his_ip_list;
+
+
+    for my $ip (@add_table)
+    {
+	my $arg = "${IPFW_PROG} table ${TARGET_TABLE_NUM} add ${ip}";
+	system($arg);
+	printf("DEBUG : ${arg}\n") if($debug);
+	syslog('info',  "add ${ip} (${conf})");
+    }
+
+    for my $ip (@delete_table)
+    {
+	my $arg = "${IPFW_PROG} table ${TARGET_TABLE_NUM} delete ${ip}";
+	system($arg);
+	printf("DEBUG : ${arg}\n") if($debug);
+	syslog('info',  "delete ${ip} (${conf})");
+    }
+}
+closelog();
+close(LOCK);
+
+exit;
+
+################################################
+# すべての定義ファイルでの共通設定ファイル
+
+sub load_global_config
+{
+    undef $DNS_PROG;
+    undef $IPFW_PROG;
+    undef $IP_HISTORY_CLEANUP_TIME;
+    undef @DNS_SERVERS;
+
+    my $tmp = "${CONF_FILE_PREFIX}/GLOBAL-CONF";
+    require $tmp if (-f $tmp );
+
+    $DNS_PROG="/usr/bin/drill" unless(defined ($DNS_PROG));
+    $IPFW_PROG="/sbin/ipfw" unless(defined ($IPFW_PROG));
+
+    $IP_HISTORY_CLEANUP_TIME = 60*60*24*7 unless(defined($IP_HISTORY_CLEANUP_TIME));
+
+    @DNS_SERVERS=("8.8.8.8", "8.8.4.4") if($#DNS_SERVERS < 0); # Google public DNS
+
+    
+    #print "DNS_SERVERS = " . join(", ", @DNS_SERVERS) . "\n";
+}
+
+
+################################################
+# 定義毎の設定ファイル。
+
+sub load_config
+{
+    local($CONF) = @_;
+
+    undef $G_get_ip_addr_cut_tail_8bit;
+    undef @TARGET_HOSTS;
+    undef $TARGET_TABLE_NUM;
+
+    $tmp = "${CONF_FILE_PREFIX}/${CONF}";
+    if ( -f $tmp )
+    {
+	require $tmp;
+    } else
+    {
+	die "No such config file : ${tmp}\n";
+    }
+
+    unless(defined($G_get_ip_addr_cut_tail_8bit))
+    {
+	$G_get_ip_addr_cut_tail_8bit = 1; #  DNSの返り値の下8bitを切り捨てる。
+    }
+
+    die "Undefined: \@TARGET_HOSTS" if($#TARGET_HOSTS < 0);
+}
+
+
+
+##################################################################
+
+#######################
+# Load History Database;
+
+sub load_history_dat
+{
+    my ($IP_HISTORY_DAT, $conf, $curr_time) = @_;
+
+    my %his_ip_list = ();
+
+    if( -f $IP_HISTORY_DAT)
+    {
+	copy($IP_HISTORY_DAT, $IP_HISTORY_DAT.".old") or die "Error: $!";
+
+	open(my $HIS, $IP_HISTORY_DAT) || die;
+
+	while(<$HIS>)
+	{
+	    chomp;
+	    #print("DEBUG: \$_=".$_."\n");
+	    next unless(/^\d+,\d+\.\d+\.\d+\.\d+\/\d+$/);    
+	    my($time, $ip) = split(/,/, $_);
+	    #print("DEBUG: \$ip=".$ip."\n");
+	    #print("DEBUG: \$time=".$time."\n");
+	    next if($time > ($curr_time + $IP_HISTORY_CLEANUP_TIME));
+	    $his_ip_list{$ip} = $time;
+	}    
+	close($HIS);
+    }
+    #print("DEBUG: " . keys(%his_ip_list)."\n");
+
+    return %his_ip_list;
+}
+
+##########################
+# Store DNS history.
+
+sub write_history_dat
+{
+    my ($fname, $ip_list) = @_;
+    #my $debug=1;
+    my $debug=0;
+
+    if($debug)
+    {
+	printf("DEBUG fname = %s\n", $fname);
+    }
+    open(my $HIS, "> ${fname}") || die;
+
+    for my $ip (keys %$ip_list)
+    {
+	print $HIS $$ip_list{$ip}. "," . $ip. "\n";
+
+	if($debug)
+	{
+	    printf("DEBUG :(write) %%ip_list: %s = %s(sec)\n", $ip, $$ip_list{$key});
+	}
+    }
+    close($HIS);
+}
+
+##########################
+# write ipfw
+
+exit;
+
+#############################
+sub get_current_table
+{
+    my ($tablenum) = @_;
+    open(my $IPFW, "${IPFW_PROG} table ${tablenum} list |") or die "ERROR: Cannot exec ipfw.";
+
+    my @ret =();
+    while(<$IPFW>)
+    {
+	chomp;
+	my $line=$_;
+	my($ip, $val) = split(/ /, $_, 2);
+	push(@ret, $ip);
+    }
+    return (&ip_sort_uniq(@ret));
+}
+
+
+sub ip_sort_uniq
+{
+    local(@list) = @_;
+    local(%ret_hash);
+
+    for my $i (@list)
+    {
+	$ret_hash{$i}=1;
+    }
+    return(sort(keys(%ret_hash)));
+}
+    
+#大域変数@DNS_SERVERSを見て引数に渡したhostnameのIPをリストで返す。
+
+#大域変数: $G_get_ip_addr_cut_tail_8bit
+
+sub get_ip_addr
+{
+    local($h) = @_;
+    local(%ret_hash);
+
+    undef %ret_hash;
+    
+    for my $ip (@DNS_SERVERS)
+    {
+	open(PIPE_D, "${DNS_PROG} \@${ip} ${h}|") || die "PIPE Error";
+
+	my $in_ans_sec=0;
+	while(<PIPE_D>)
+	{
+	    #print "#DEBUG " . $_;
+	    if(/ANSWER SECTION/)
+	    {
+		$in_ans_sec = 1;
+		next;
+	    }
+
+	    if($in_ans_sec==0)
+	    {
+		next;
+	    }
+	
+	    if(/^$/)
+	    {
+		$in_ans_sec=0;
+		next;
+	    }
+	    if(/CNAME/)
+	    {
+		#print ("#")
+		next;
+	    }
+	    unless(/\s+A\s+/) # A queryのみ
+	    {
+		next;
+	    }
+	    # IPにマッチさせる。
+	    if(/(\d+\.\d+\.\d+\.\d+)/)
+	    {
+		#print "#DEBUG " . $1 . "\n";
+
+		my $i = $1;
+		if($G_get_ip_addr_cut_tail_8bit)
+		{
+		    $i =~ s/\.\d+$/.0\/24/;
+		}
+		else
+		{
+		    $i .= "/32";
+		}
+		$ret_hash{$i}=1;		    
+	    }
+	}
+	close(PIPE_D);
+    }
+
+    return(sort(keys(%ret_hash)));
+}
