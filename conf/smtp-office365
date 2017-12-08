@@ -14,7 +14,7 @@ $TARGET_TABLE_NUM="21";
 # nnnのところは$TARGET_TABLE_NUMと同じ数字を記載してください。
 # hostnameのところは$TARGET_HOSTと同じホスト名を記載してください。
 
-# ${fwcmd} add allow tcp from LOCAL-IP to "table(nnn)" smtps,submission
+# ${fwcmd} add allow tcp from LOCAL-IP to "table(nnn)" smtps,submission setup
 # ${fwcmd} table nnn add hostname
 
 

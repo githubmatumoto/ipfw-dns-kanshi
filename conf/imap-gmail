@@ -8,13 +8,13 @@ $G_get_ip_addr_cut_tail_8bit = 1; # DNSの返り値の下8bitを切り捨てる�
 
 @TARGET_HOSTS=("imap.gmail.com");
 
-$TARGET_TABLE_NUM="10";
+$TARGET_TABLE_NUM="40";
 
 # /etc/rc.firewallの適切なところに以下のようなルールを記載してください。
 # nnnのところは$TARGET_TABLE_NUMと同じ数字を記載してください。
 # hostnameのところは@TARGET_HOSTと同じホスト名を記載してください。
 
-# ${fwcmd} add allow tcp from LOCAL-IP to table(nnn) imaps,submission
+# ${fwcmd} add allow tcp from LOCAL-IP to table(nnn) imaps,pop3s setup
 # ${fwcmd} table nnn add hostname
 
 

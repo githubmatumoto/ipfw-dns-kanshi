@@ -3,7 +3,7 @@
 # Copyright 2017 Ryuji MATSUMOTO
 # License: GPL2
 
-# 動作確認OS: FreeBSD R10.3のみ．
+# 動作確認OS: FreeBSD R10.4のみ．
 
 # DNSを監視して ipfwのルールを更新するツール。ipfwのルールにホスト名
 # (www.example.com)とか書いてもipfwを実行時に引いたIPアドレス固定になり
