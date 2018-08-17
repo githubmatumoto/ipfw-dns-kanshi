@@ -316,6 +316,7 @@ sub get_current_table
     {
 	chomp;
 	my $line=$_;
+	next if($line =~ /table/);
 	my($ip, $val) = split(/ /, $_, 2);
 	push(@ret, $ip);
     }
